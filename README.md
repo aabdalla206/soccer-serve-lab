@@ -24,21 +24,31 @@ python bench_prefix_cache.py --prefix-caching on
 
 ## Results
 
-Fill these in from your own runs. Do not publish numbers you did not measure.
+**Decode attention kernel**, Tesla T4 (Colab), fp16, 16 heads, head_dim 64, KV block size 16.
+All 28 correctness tests pass against the fp32 reference. Bandwidth counts K and V bytes read once.
+The T4's peak memory bandwidth is about 320 GB/s.
 
-| Experiment | Result |
-|---|---|
-| GPU | |
-| Triton vs SDPA, batch=32, seq=16384 (GB/s) | |
-| vLLM mean TTFT, prefix caching off (ms) | |
-| vLLM mean TTFT, prefix caching on (ms) | |
-| Prompt length (tokens) | |
+| Batch | Seq len | Gather + SDPA (ms) | Triton (ms) | Triton GB/s | Speedup |
+|---|---|---|---|---|---|
+| 1 | 1,024 | 0.36 | 0.10 | 42 | 3.6x |
+| 1 | 16,384 | 1.78 | 1.44 | 46 | 1.2x |
+| 8 | 4,096 | 3.90 | 0.68 | 198 | 5.7x |
+| 8 | 16,384 | 14.03 | 2.72 | 198 | 5.2x |
+| 32 | 1,024 | 7.33 | 0.62 | 215 | 11.7x |
+| 32 | 16,384 | 56.14 | 12.19 | 176 | 4.6x |
 
-Plot: `decode_bench.png`. Raw data: `results.csv`, `prefix_cache_results.jsonl`.
+Full sweep: `results.csv`.
+
+**Read the speedup carefully.** The baseline gathers each sequence's paged K/V into contiguous memory with a Python loop and then calls SDPA. Much of the gap comes from that extra copy and per-sequence launches, not from SDPA's attention math. The more honest measure is achieved bandwidth: the kernel reaches roughly two thirds of the T4's peak at batch 8 and above.
+
+**vLLM prefix caching:** not run yet. See `bench_prefix_cache.py`.
 
 ## What I learned
 
-(Write this after benchmarking. Where does the kernel lose to SDPA, and why? Decode attention is memory bound, so compare achieved GB/s to the GPU's peak bandwidth.)
+- Decode attention is memory bound, so achieved GB/s against peak bandwidth is the right scorecard, not FLOPs.
+- Reading K/V straight through the block table avoids materializing a contiguous copy, which is the whole point of a paged-KV kernel.
+- At batch 1 the kernel launches only 16 programs (one per head), which cannot fill the T4's 40 SMs, so it stalls near 45 GB/s however long the sequence. Splitting each sequence's KV across several programs and reducing the partial softmax results (flash-decoding) is the fix.
+- Bandwidth dips at batch 32 and 16K tokens (176 vs ~210 GB/s), worth profiling with Nsight Compute.
 
 ## Limitations
 
