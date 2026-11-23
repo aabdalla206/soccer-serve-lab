@@ -1,0 +1,2 @@
+{"prefix_caching": "off", "model": "Qwen/Qwen2.5-0.5B-Instruct", "prompt_tokens": 5303, "n_requests": 20, "mean_ttft_ms": 2147.55, "batch_tokens_per_s": 27.0}
+{"prefix_caching": "on", "model": "Qwen/Qwen2.5-0.5B-Instruct", "prompt_tokens": 5303, "n_requests": 20, "mean_ttft_ms": 74.5, "batch_tokens_per_s": 377.7}

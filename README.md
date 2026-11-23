@@ -41,7 +41,14 @@ Full sweep: `results.csv`.
 
 **Read the speedup carefully.** The baseline gathers each sequence's paged K/V into contiguous memory with a Python loop and then calls SDPA. Much of the gap comes from that extra copy and per-sequence launches, not from SDPA's attention math. The more honest measure is achieved bandwidth: the kernel reaches roughly two thirds of the T4's peak at batch 8 and above.
 
-**vLLM prefix caching:** not run yet. See `bench_prefix_cache.py`.
+**vLLM prefix caching**, Tesla T4, Qwen2.5-0.5B-Instruct (fp16), 2018 World Cup final event log as a 5,303-token shared prefix, 20 analyst questions.
+
+| | Prefix caching off | Prefix caching on | Change |
+|---|---|---|---|
+| Mean time to first token (one request at a time) | 2,148 ms | 74.5 ms | 29x faster |
+| Batch throughput (20 questions, 64 output tokens each) | 27 tok/s | 378 tok/s | 14x |
+
+With caching on, the 5.3K-token match log is prefilled once and every later question reuses its KV cache, so each request only prefills its own question. Without it, every request recomputes the whole log, and that prefill dominates both latency and batch time. Raw data: `prefix_cache_results.jsonl`. These are vLLM's own kernels; my Triton kernel is benchmarked separately above.
 
 ## What I learned
 
@@ -49,6 +56,7 @@ Full sweep: `results.csv`.
 - Reading K/V straight through the block table avoids materializing a contiguous copy, which is the whole point of a paged-KV kernel.
 - At batch 1 the kernel launches only 16 programs (one per head), which cannot fill the T4's 40 SMs, so it stalls near 45 GB/s however long the sequence. Splitting each sequence's KV across several programs and reducing the partial softmax results (flash-decoding) is the fix.
 - Bandwidth dips at batch 32 and 16K tokens (176 vs ~210 GB/s), worth profiling with Nsight Compute.
+- For a shared-context workload, the biggest win is not a faster kernel but not doing the work at all: prefix caching cut time to first token 29x by reusing the match log's KV cache.
 
 ## Limitations
 
